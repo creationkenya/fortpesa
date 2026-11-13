@@ -6,6 +6,9 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Helper function for delay
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 app.post('/api/bulk-stk', async (req, res) => {
     const { phones, amount, account_reference, channel_id, api_key } = req.body;
     const apiKey = api_key || process.env.FORTPESA_API_KEY;
@@ -29,8 +32,15 @@ app.post('/api/bulk-stk', async (req, res) => {
 
     const results = [];
 
-    // Process each number sequentially to respect rate limits
-    for (const phone of phoneList) {
+    // Process each number with an 8-second delay between requests
+    for (let i = 0; i < phoneList.length; i++) {
+        const phone = phoneList[i];
+
+        // If not the first request, wait 8 seconds before proceeding
+        if (i > 0) {
+            await sleep(8000);
+        }
+
         try {
             const idempotencyKey = `bulk-${Date.now()}-${phone}`;
             const response = await fetch('https://fortpesa.co.ke/api/v1/payments/stk', {
