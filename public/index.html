@@ -3,49 +3,57 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fortpesa STK Push Bot</title>
+    <title>Fortpesa Bulk STK Push Bot</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f9; margin: 0; padding: 40px; display: flex; justify-content: center; }
-        .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); width: 100%; max-width: 450px; }
+        .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); width: 100%; max-width: 550px; }
         h2 { margin-top: 0; color: #1a202c; font-size: 22px; }
         .form-group { margin-bottom: 16px; }
         label { display: block; font-size: 13px; font-weight: 600; color: #4a5568; margin-bottom: 6px; }
-        input { width: 100%; padding: 10px 12px; border: 1px solid #cbd5e0; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
-        input:focus { outline: none; border-color: #3182ce; box-shadow: 0 0 0 3px rgba(66,153,225,0.15); }
+        input, textarea { width: 100%; padding: 10px 12px; border: 1px solid #cbd5e0; border-radius: 6px; font-size: 14px; box-sizing: border-box; font-family: inherit; }
+        textarea { resize: vertical; height: 120px; }
+        input:focus, textarea:focus { outline: none; border-color: #3182ce; box-shadow: 0 0 0 3px rgba(66,153,225,0.15); }
         button { background: #3182ce; color: white; border: none; padding: 12px; width: 100%; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
         button:hover { background: #2b6cb0; }
-        #result { margin-top: 20px; padding: 12px; border-radius: 6px; font-size: 13px; white-space: pre-wrap; display: none; }
-        .success { background: #f0fff4; color: #22543d; border: 1px solid #c6f6d5; }
-        .error { background: #fff5f5; color: #742a2a; border: 1px solid #fed7d7; }
+        button:disabled { background: #a0aec0; cursor: not-allowed; }
+        #result { margin-top: 20px; display: none; }
+        .summary-box { padding: 12px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; font-weight: 600; }
+        .summary-success { background: #f0fff4; color: #22543d; border: 1px solid #c6f6d5; }
+        .log-item { padding: 10px; margin-bottom: 8px; border-radius: 6px; font-size: 13px; border: 1px solid #e2e8f0; }
+        .log-success { background: #f7fafc; border-left: 4px solid #38a169; }
+        .log-error { background: #fff5f5; border-left: 4px solid #e53e3e; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h2>Fortpesa STK Push Bot</h2>
+        <h2>Fortpesa Bulk STK Push Bot</h2>
         <form id="stkForm">
             <div class="form-group">
                 <label>API Key (Leave blank to use server environment variable)</label>
                 <input type="password" id="api_key" placeholder="pb_live_...">
             </div>
             <div class="form-group">
-                <label>Phone Number</label>
-                <input type="text" id="phone" value="0712345678" required>
+                <label>Phone Numbers (One per line, starting with 254)</label>
+                <textarea id="phones" placeholder="254712345678&#10;254798765432&#10;254700112233" required>254712345678&#10;254722334455</textarea>
             </div>
             <div class="form-group">
-                <label>Amount (KES)</label>
+                <label>Amount (KES) per Request</label>
                 <input type="number" id="amount" value="150" required>
             </div>
             <div class="form-group">
-                <label>Account Reference</label>
-                <input type="text" id="account_reference" value="INV-2041" required>
+                <label>Base Account Reference</label>
+                <input type="text" id="account_reference" value="INV-BULK" required>
             </div>
             <div class="form-group">
                 <label>Channel ID</label>
                 <input type="number" id="channel_id" value="42" required>
             </div>
-            <button type="submit" id="submitBtn">Trigger STK Push</button>
+            <button type="submit" id="submitBtn">Trigger Bulk STK Pushes</button>
         </form>
-        <div id="result"></div>
+        <div id="result">
+            <div id="summary" class="summary-box"></div>
+            <div id="logs"></div>
+        </div>
     </div>
 
     <script>
@@ -53,21 +61,24 @@
             e.preventDefault();
             const btn = document.getElementById('submitBtn');
             const resultDiv = document.getElementById('result');
+            const summaryDiv = document.getElementById('summary');
+            const logsDiv = document.getElementById('logs');
             
             btn.disabled = true;
-            btn.innerText = 'Sending STK Push...';
+            btn.innerText = 'Processing Bulk Requests...';
             resultDiv.style.display = 'none';
+            logsDiv.innerHTML = '';
 
             const payload = {
                 api_key: document.getElementById('api_key').value,
-                phone: document.getElementById('phone').value,
+                phones: document.getElementById('phones').value,
                 amount: document.getElementById('amount').value,
                 account_reference: document.getElementById('account_reference').value,
                 channel_id: document.getElementById('channel_id').value
             };
 
             try {
-                const res = await fetch('/api/trigger-stk', {
+                const res = await fetch('/api/bulk-stk', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -76,19 +87,38 @@
 
                 resultDiv.style.display = 'block';
                 if (res.ok) {
-                    resultDiv.className = 'success';
-                    resultDiv.innerText = 'STK Push Triggered Successfully!\n\n' + JSON.stringify(data, null, 2);
+                    const total = data.results.length;
+                    const successful = data.results.filter(r => r.success).length;
+                    const failed = total - successful;
+
+                    summaryDiv.className = 'summary-box summary-success';
+                    summaryDiv.innerText = `Completed: ${successful}/${total} successful (${failed} failed)`;
+
+                    data.results.forEach(item => {
+                        const div = document.createElement('div');
+                        div.className = `log-item ${item.success ? 'log-success' : 'log-error'}`;
+                        if (item.success) {
+                            div.innerHTML = `<strong>${item.phone}</strong>: Pushed successfully (UUID: ${item.data.uuid || 'N/A'})`;
+                        } else {
+                            div.innerHTML = `<strong>${item.phone}</strong>: Failed - ${item.error}`;
+                        }
+                        logsDiv.appendChild(div);
+                    });
                 } else {
-                    resultDiv.className = 'error';
-                    resultDiv.innerText = 'Error: ' + (data.error || 'Request failed') + '\n\n' + JSON.stringify(data, null, 2);
+                    summaryDiv.className = 'summary-box';
+                    summaryDiv.style.background = '#fff5f5';
+                    summaryDiv.style.color = '#742a2a';
+                    summaryDiv.innerText = 'Error: ' + (data.error || 'Request failed');
                 }
             } catch (err) {
                 resultDiv.style.display = 'block';
-                resultDiv.className = 'error';
-                resultDiv.innerText = 'Network Error: ' + err.message;
+                summaryDiv.className = 'summary-box';
+                summaryDiv.style.background = '#fff5f5';
+                summaryDiv.style.color = '#742a2a';
+                summaryDiv.innerText = 'Network Error: ' + err.message;
             } finally {
                 btn.disabled = false;
-                btn.innerText = 'Trigger STK Push';
+                btn.innerText = 'Trigger Bulk STK Pushes';
             }
         });
     </script>
